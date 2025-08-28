@@ -1,0 +1,15 @@
+[workspace]
+members = [
+  "hkdf",
+  "client", 
+  "server", 
+  "handshake", 
+]
+resolver = "2"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
+blake3 = "1"
+serde = { version = "1", features = ["derive"]}
+bincode = "1"
+ring = "0.17" 
