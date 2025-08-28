@@ -1,17 +1,30 @@
+use handshake::message::{payloads::{Header, Message}, types::{MessageType, ServerHelloPayload}};
 use hkdf::hkdf_hello;
+use ring::rand::SystemRandom;
 use std::error::Error;
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}};
 
 
-async fn handle_client (mut stream: TcpStream) -> Result<(), Box<dyn Error>> {
-    let mut buffer = [0u8; 1024];
-    let n = stream.read(&mut buffer).await?;
-    let req = String::from_utf8_lossy(&buffer[..n]);
-    println!("Received from client: {}", req.trim());
+async fn handle_client (mut stream: TcpStream, rng: &SystemRandom) -> Result<(), Box<dyn Error>> {
+    let mut len_bytes = [0u8; 4];
+    stream.read_exact(&mut len_bytes).await?;
+    let data_len = u32::from_be_bytes(len_bytes) as usize;
+
+    let mut data = vec![0u8; data_len];
+    stream.read_exact(&mut data).await?;
+    let req = Message::decode(&data)?;
+    println!("Received from client: {:?}", req);
+
     hkdf_hello();
-    let resp = "Hello World!\n";
-    stream.write_all(resp.as_bytes()).await?;
-    println!("Sent response to client");
+    
+    let header  = Header::new(1234u64, "Server".to_string(), MessageType::ServerHello);
+    let payload = ServerHelloPayload::new(&rng);
+    let message = Message::new(header, payload.into());
+    let data = message.encode()?;
+
+    stream.write_all(&(data.len() as u32).to_be_bytes()).await?;
+    stream.write_all(&data).await?;
+    println!("Sent message {:?}", message);
     Ok(())
 }
 
@@ -25,7 +38,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("New client connected {}", addr);
 
         tokio::spawn(async move {
-            if let Err(e) = handle_client(stream).await {
+            let rng = SystemRandom::new();
+            if let Err(e) = handle_client(stream, &rng).await {
                 eprintln!("Error handling client: {}", e);
             }
         });
