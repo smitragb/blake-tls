@@ -30,6 +30,7 @@ pub struct ClientState<S> {
     _marker: std::marker::PhantomData<S>,
 }
 
+#[derive(Debug)]
 pub struct SessionData {
     rng: SystemRandom, 
     pub transcript: Vec<Payload>,

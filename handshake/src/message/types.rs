@@ -87,19 +87,27 @@ pub struct ServerInfoPayload {
 }
 
 impl ServerInfoPayload {
+    #[inline(always)]
     pub fn fill(pk: &PublicKey) -> Self {
         let pk_bytes = pk.as_ref().to_vec();
         Self { ephemeral_pk: pk_bytes }
     }
 
+    #[inline(always)]
     pub fn compute_and_fill(sk: &EphemeralPrivateKey) -> Self {
         let pk = sk.compute_public_key().expect("Failed to compute Public key");
         let pk_bytes = pk.as_ref().to_vec();
         Self { ephemeral_pk: pk_bytes }
     }
 
+    #[inline(always)]
     pub fn get_bytes(&self) -> Vec<u8> {
         self.ephemeral_pk.clone()
+    }
+
+    #[inline(always)]
+    pub fn prepare_message(header: Header, payload: ServerInfoPayload) -> Message {
+        Message::new(header, payload.into())
     }
 }
 
@@ -118,6 +126,11 @@ impl From<ServerHelloDonePayload> for Payload {
     }
 }
 
+impl ServerHelloDonePayload {
+    pub fn prepare_message(header: Header) -> Message {
+        Message::new(header, ServerHelloDonePayload {}.into())
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientPMKPayload {
     encrypted_shared: Vec<u8>,

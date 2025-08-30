@@ -39,9 +39,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let client = client.on_client_hello(payload);
     send_message(&mut stream, msg).await?;
 
-    let resp = receive_message(&mut stream).await?;
-    let payload = expect_payload! (resp.get_payload(), ServerHello)?;
-    let client = client.on_server_hello(payload);
-    println!("Transcript: {:#?}", client.session_data.transcript);
+    let resp    = receive_message(&mut stream).await?;
+    let payload = expect_payload!(resp.get_payload(), ServerHello)?;
+    let client  = client.on_server_hello(payload);
+
+    let resp    = receive_message(&mut stream).await?;
+    let payload = expect_payload!(resp.get_payload(), ServerInfo)?;
+    let client  = client.on_server_info(payload);
+
+    let resp    = receive_message(&mut stream).await?;
+    let payload = expect_payload!(resp.get_payload(), ServerHelloDone)?;
+    let client  = client.on_server_hello_done(payload);
+
+    println!("Session Data: {:#?}", client.session_data);
     Ok(())
 }

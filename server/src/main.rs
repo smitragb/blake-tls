@@ -1,4 +1,4 @@
-use handshake::message::{payloads::{Header, Message}, types::{MessageType, Payload, ServerHelloPayload}};
+use handshake::message::{payloads::{Header, Message}, types::{MessageType, Payload, ServerHelloDonePayload, ServerHelloPayload, ServerInfoPayload}};
 use hkdf::hkdf_hello;
 use server::{expect_payload, ServerState};
 use std::error::Error;
@@ -20,18 +20,35 @@ async fn send_message (stream: &mut TcpStream, msg: Message) -> Result<(), Box<d
 }
 
 async fn handle_client (mut stream: TcpStream) -> Result<(), Box<dyn Error>> {
+    // Client Hello
     let server = ServerState::new();
     let req = receive_message(&mut stream).await?;
     let payload = expect_payload!(req.get_payload(), ClientHello)?;
     let server = server.on_client_hello(payload);
     hkdf_hello();
     
-    let header = Header::new(1234u64, "Server".to_string(), MessageType::ServerHello);
+    // Server Hello
+    let header  = Header::new(1234u64, "Server".to_string(), MessageType::ServerHello);
     let payload = ServerHelloPayload::fill_nonce(server.session_data.my_nonce);
-    let msg = ServerHelloPayload::prepare_message(header, payload.clone());
-    let server = server.on_server_hello(payload); 
+    let msg     = ServerHelloPayload::prepare_message(header, payload.clone());
+    let server  = server.on_server_hello(payload); 
     send_message(&mut stream, msg).await?;
-    println!("Transcript: {:#?}", server.session_data.transcript);
+    
+    // Server Info
+    let header  = Header::new(1234u64, "Server".to_string(), MessageType::ServerInfo);
+    let payload = ServerInfoPayload::compute_and_fill(&server.session_data.my_sk);
+    let msg     = ServerInfoPayload::prepare_message(header, payload.clone());
+    let server  = server.on_server_info(payload);
+    send_message(&mut stream, msg).await?;
+
+    // Server Hello Done
+    let header  = Header::new(1234u64, "Server".to_string(), MessageType::ServerHelloDone);
+    let payload = ServerHelloDonePayload {};
+    let msg     = ServerHelloDonePayload::prepare_message(header);
+    let server  = server.on_server_hello_done(payload);
+    send_message(&mut stream, msg).await?;
+
+    println!("Session Data: {:#?}", server.session_data);
 
     Ok(())
 }

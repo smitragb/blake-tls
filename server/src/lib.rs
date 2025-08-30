@@ -25,6 +25,7 @@ macro_rules! expect_payload {
     };
 }
 
+#[derive(Debug)]
 pub struct SessionData {
     rng: SystemRandom,
     pub transcript: Vec<Payload>,
