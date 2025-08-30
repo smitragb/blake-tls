@@ -1,13 +1,15 @@
+#[derive(Debug, PartialEq)]
 pub enum ClientHandshakeState {
     Start, 
     AwaitingServerHello,
     AwaitingServerInfo,
     AwaitingServerHelloDone,
+    Finished,
 }
 
 pub enum ServerHandshakeState {
-    Start,
     AwaitingClientHello,
     AwaitingClientPreMasterKey,
     AwaitingClientKeyExchange,
+    Finished,
 }

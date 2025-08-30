@@ -1,7 +1,9 @@
-use ring::{agreement::{EphemeralPrivateKey, PublicKey}, rand::{SecureRandom, SystemRandom}};
+use ring::agreement::{EphemeralPrivateKey, PublicKey};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use super::payloads::{Header, Message};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MessageType {
     ClientHello, 
     ServerHello,
@@ -29,10 +31,19 @@ pub struct ClientHelloPayload {
 }
 
 impl ClientHelloPayload {
-    pub fn new(rng: &SystemRandom) -> Self {
-        let mut out = [0u8; 32];
-        rng.fill(&mut out).expect("Failed to generate nonce");
-        Self { nonce: out.clone() }
+    #[inline(always)]
+    pub fn fill_nonce (nonce: [u8; 32]) -> Self {
+        Self { nonce }
+    }
+    
+    #[inline(always)]
+    pub fn get_nonce(&self) -> [u8; 32] {
+        self.nonce.clone()
+    }
+
+    #[inline(always)]
+    pub fn prepare_message (header: Header, payload: ClientHelloPayload) -> Message {
+        Message::new(header, payload.into())
     }
 }
 
@@ -48,10 +59,19 @@ pub struct ServerHelloPayload {
 }
 
 impl ServerHelloPayload {
-    pub fn new(rng: &SystemRandom) -> Self {
-        let mut out = [0u8; 32];
-        rng.fill(&mut out).expect("Failed to generate nonce");
-        Self { nonce: out.clone() }
+    #[inline(always)]
+    pub fn fill_nonce(nonce: [u8; 32]) -> Self {
+        Self { nonce }
+    }
+
+    #[inline(always)]
+    pub fn get_nonce(&self) -> [u8; 32] {
+        self.nonce.clone()
+    }
+
+    #[inline(always)]
+    pub fn prepare_message (header: Header, payload: ServerHelloPayload)  -> Message {
+        Message::new(header, payload.into())
     }
 }
 
@@ -76,6 +96,10 @@ impl ServerInfoPayload {
         let pk = sk.compute_public_key().expect("Failed to compute Public key");
         let pk_bytes = pk.as_ref().to_vec();
         Self { ephemeral_pk: pk_bytes }
+    }
+
+    pub fn get_bytes(&self) -> Vec<u8> {
+        self.ephemeral_pk.clone()
     }
 }
 

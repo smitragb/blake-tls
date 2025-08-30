@@ -1,34 +1,47 @@
 use std::error::Error;
 
+use client::{ClientState,expect_payload};
 use handshake::message::{
     payloads::{Header, Message},
-    types::{ClientHelloPayload, MessageType}
+    types::{ClientHelloPayload, MessageType, Payload}
 };
-use ring::rand::SystemRandom;
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
+
+async fn send_message (
+    stream: &mut TcpStream, 
+    msg: Message
+) -> Result<(), Box<dyn Error>> {
+    let data = msg.encode()?;
+    stream.write_u32(data.len() as u32).await?;
+    stream.write_all(&data).await?;
+    Ok(())
+}
+
+async fn receive_message (
+    stream: &mut TcpStream
+) -> Result<Message, Box<dyn Error>> {
+    let n = stream.read_u32().await? as usize;
+    let mut data = vec![0u8; n];
+    stream.read_exact(&mut data).await?;
+    let resp = Message::decode(&data)?;
+    Ok(resp)
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let mut stream = TcpStream::connect("127.0.0.1:50051").await?;
     println!("Connected to server!");
-    let rng = SystemRandom::new();
-
     let header  = Header::new(0u64, "Client1".to_string(), MessageType::ClientHello);
-    let payload = ClientHelloPayload::new(&rng);
-    let message = Message::new(header, payload.into());
-    let data = message.encode()?;
 
-    stream.write_all(&(data.len() as u32).to_be_bytes()).await?;
-    stream.write_all(&data).await?;
-    println!("Sent: {:?}", message);
+    let client = ClientState::new();
+    let payload = ClientHelloPayload::fill_nonce(client.session_data.my_nonce);
+    let msg = ClientHelloPayload::prepare_message(header, payload.clone());
+    let client = client.on_client_hello(payload);
+    send_message(&mut stream, msg).await?;
 
-    let mut len_bytes = [0u8; 4];
-    stream.read_exact(&mut len_bytes).await?;
-    let data_len = u32::from_be_bytes(len_bytes) as usize;
-
-    let mut data = vec![0u8; data_len];
-    stream.read_exact(&mut data).await?;
-    let resp = Message::decode(&data)?;
-    println!("Received from server!: {:?}", resp);
+    let resp = receive_message(&mut stream).await?;
+    let payload = expect_payload! (resp.get_payload(), ServerHello)?;
+    let client = client.on_server_hello(payload);
+    println!("Transcript: {:#?}", client.session_data.transcript);
     Ok(())
 }

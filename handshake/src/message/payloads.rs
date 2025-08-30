@@ -35,4 +35,9 @@ impl Message {
     pub fn decode(data: &[u8]) -> Result<Self, bincode::Error> {
         bincode::deserialize(data)
     }
+
+    #[inline(always)]
+    pub fn get_payload(self) -> Payload {
+        self.payload
+    }
 }

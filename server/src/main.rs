@@ -1,30 +1,38 @@
-use handshake::message::{payloads::{Header, Message}, types::{MessageType, ServerHelloPayload}};
+use handshake::message::{payloads::{Header, Message}, types::{MessageType, Payload, ServerHelloPayload}};
 use hkdf::hkdf_hello;
-use ring::rand::SystemRandom;
+use server::{expect_payload, ServerState};
 use std::error::Error;
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}};
 
-
-async fn handle_client (mut stream: TcpStream, rng: &SystemRandom) -> Result<(), Box<dyn Error>> {
-    let mut len_bytes = [0u8; 4];
-    stream.read_exact(&mut len_bytes).await?;
-    let data_len = u32::from_be_bytes(len_bytes) as usize;
-
-    let mut data = vec![0u8; data_len];
+async fn receive_message (stream: &mut TcpStream) -> Result<Message, Box<dyn Error>> {
+    let n = stream.read_u32().await? as usize;
+    let mut data = vec![0u8; n];
     stream.read_exact(&mut data).await?;
-    let req = Message::decode(&data)?;
-    println!("Received from client: {:?}", req);
+    let resp = Message::decode(&data)?;
+    Ok(resp) 
+}
 
+async fn send_message (stream: &mut TcpStream, msg: Message) -> Result<(), Box<dyn Error>> {
+    let data = msg.encode()?;
+    stream.write_u32(data.len() as u32).await?;
+    stream.write_all(&data).await?;
+    Ok(())
+}
+
+async fn handle_client (mut stream: TcpStream) -> Result<(), Box<dyn Error>> {
+    let server = ServerState::new();
+    let req = receive_message(&mut stream).await?;
+    let payload = expect_payload!(req.get_payload(), ClientHello)?;
+    let server = server.on_client_hello(payload);
     hkdf_hello();
     
-    let header  = Header::new(1234u64, "Server".to_string(), MessageType::ServerHello);
-    let payload = ServerHelloPayload::new(&rng);
-    let message = Message::new(header, payload.into());
-    let data = message.encode()?;
+    let header = Header::new(1234u64, "Server".to_string(), MessageType::ServerHello);
+    let payload = ServerHelloPayload::fill_nonce(server.session_data.my_nonce);
+    let msg = ServerHelloPayload::prepare_message(header, payload.clone());
+    let server = server.on_server_hello(payload); 
+    send_message(&mut stream, msg).await?;
+    println!("Transcript: {:#?}", server.session_data.transcript);
 
-    stream.write_all(&(data.len() as u32).to_be_bytes()).await?;
-    stream.write_all(&data).await?;
-    println!("Sent message {:?}", message);
     Ok(())
 }
 
@@ -38,8 +46,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("New client connected {}", addr);
 
         tokio::spawn(async move {
-            let rng = SystemRandom::new();
-            if let Err(e) = handle_client(stream, &rng).await {
+            if let Err(e) = handle_client(stream).await {
                 eprintln!("Error handling client: {}", e);
             }
         });
