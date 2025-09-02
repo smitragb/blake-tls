@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 use handshake::{
     message::types::{
-        ClientFinishedPayload, ClientHelloPayload, ClientKXPayload, Payload, ServerFinishedPayload, ServerHelloDonePayload, ServerHelloPayload, ServerInfoPayload
+        ClientFinishedPayload, ClientHelloPayload, ClientKXPayload, 
+        ServerFinishedPayload, ServerHelloDonePayload, ServerHelloPayload, ServerInfoPayload
     }, 
     protocol::state::ClientHandshakeState
 };
@@ -40,7 +41,8 @@ pub struct ClientState<S> {
 #[derive(Debug)]
 pub struct SessionData {
     rng: SystemRandom, 
-    pub transcript: Vec<Payload>,
+    hasher: Blake3Hkdf,
+    pub transcript_hash: [u8; 32],
     pub server_nonce: [u8; 32],
     pub my_nonce: [u8; 32],
     pub server_pk_bytes: Vec<u8>,
@@ -48,6 +50,7 @@ pub struct SessionData {
     pub shared_secret: Vec<u8>,
     pub server_sym_key: Vec<u8>,
     pub my_sym_key: Vec<u8>,
+    pub aead_nonce: [u8; 12],
 }
 
 impl SessionData {
@@ -56,10 +59,13 @@ impl SessionData {
         let sk = EphemeralPrivateKey::generate(&X25519, &rng)
             .expect("Unable to generate private key");
         let mut out = [0u8; 32];
+        let mut nonce = [0u8; 12];
         rng.fill(&mut out).expect("Unable to generate nonce");
+        rng.fill(&mut nonce).expect("Unable to generate AEAD nonce");
         Self {
             rng,
-            transcript: Vec::new(),
+            hasher: Blake3Hkdf::new(),
+            transcript_hash: [0u8; 32],
             server_nonce: [0u8; 32],
             my_nonce: out.clone(),
             server_pk_bytes: Vec::new(),
@@ -67,6 +73,7 @@ impl SessionData {
             shared_secret: Vec::new(),
             server_sym_key: Vec::new(),
             my_sym_key: Vec::new(),
+            aead_nonce: nonce,
         }
     }
 
@@ -97,8 +104,10 @@ impl ClientState<Start> {
         mut self,
         msg: ClientHelloPayload
     ) -> ClientState<AwaitingServerHello> {
+        let msg_bytes = bincode::serialize(&msg).unwrap(); 
         self.handshake_state = ClientHandshakeState::AwaitingServerHello;
-        self.session_data.transcript.push(msg.into());
+        self.session_data.hasher.absorb(&msg_bytes);
+        self.session_data.transcript_hash = self.session_data.hasher.finalize();
         ClientState {
             handshake_state: self.handshake_state,
             session_data   : self.session_data,
@@ -112,10 +121,12 @@ impl ClientState<AwaitingServerHello> {
         mut self, 
         msg: ServerHelloPayload
     ) -> ClientState<AwaitingServerInfo> {
+        let msg_bytes = bincode::serialize(&msg).unwrap(); 
         let server_nonce = msg.get_nonce();
         self.handshake_state = ClientHandshakeState::AwaitingServerInfo;
-        self.session_data.transcript.push(msg.into());
+        self.session_data.hasher.absorb(&msg_bytes);
         self.session_data.server_nonce = server_nonce;
+        self.session_data.transcript_hash = self.session_data.hasher.finalize();
         ClientState { 
             handshake_state: self.handshake_state, 
             session_data   : self.session_data, 
@@ -129,10 +140,12 @@ impl ClientState<AwaitingServerInfo> {
         mut self, 
         msg: ServerInfoPayload
     ) -> ClientState<AwaitingServerHelloDone> {
+        let msg_bytes = bincode::serialize(&msg).unwrap(); 
         let server_pk_bytes = msg.get_bytes();
         self.handshake_state = ClientHandshakeState::AwaitingServerHelloDone;
-        self.session_data.transcript.push(msg.into());
+        self.session_data.hasher.absorb(&msg_bytes);
         self.session_data.server_pk_bytes = server_pk_bytes;
+        self.session_data.transcript_hash = self.session_data.hasher.finalize();
         ClientState { 
             handshake_state: self.handshake_state, 
             session_data   : self.session_data, 
@@ -147,8 +160,10 @@ impl ClientState<AwaitingServerHelloDone> {
         mut self, 
         msg: ServerHelloDonePayload
     ) -> ClientState<SendingPublicKeyInfo> {
+        let msg_bytes = bincode::serialize(&msg).unwrap(); 
         self.handshake_state = ClientHandshakeState::SendingPublicKeyInfo;
-        self.session_data.transcript.push(msg.into());
+        self.session_data.hasher.absorb(&msg_bytes);
+        self.session_data.transcript_hash = self.session_data.hasher.finalize();
         ClientState { 
             handshake_state: self.handshake_state, 
             session_data   : self.session_data, 
@@ -164,8 +179,10 @@ impl ClientState<SendingPublicKeyInfo> {
     ) -> ClientState<SendingFinished> {
         let server_nonce = self.session_data.server_nonce;
         let my_nonce = self.session_data.my_nonce;
+        let msg_bytes = bincode::serialize(&msg).unwrap(); 
         self.handshake_state = ClientHandshakeState::SendingFinished;
-        self.session_data.transcript.push(msg.into());
+        self.session_data.hasher.absorb(&msg_bytes);
+        self.session_data.transcript_hash = self.session_data.hasher.finalize();
         
         // Using unwrap here because sk is guaranteed to be present since the 
         // ClientKXPayload contains the public key.
@@ -198,8 +215,10 @@ impl ClientState<SendingFinished> {
         mut self,
         msg: ClientFinishedPayload,
     ) -> ClientState<AwaitingServerFinished> {
+        let msg_bytes = bincode::serialize(&msg).unwrap(); 
         self.handshake_state = ClientHandshakeState::AwaitingServerFinished;
-        self.session_data.transcript.push(msg.into());
+        self.session_data.hasher.absorb(&msg_bytes);
+        self.session_data.transcript_hash = self.session_data.hasher.finalize();
         ClientState { 
             handshake_state: self.handshake_state, 
             session_data   : self.session_data, 
@@ -213,14 +232,19 @@ impl ClientState<AwaitingServerFinished> {
         mut self,
         msg: ServerFinishedPayload,
     ) -> ClientState<Finished> {
+        let msg_bytes  = bincode::serialize(&msg).unwrap(); 
+        let aead_nonce = msg.get_aead_nonce(); 
+        let transcript_hash = self.session_data.transcript_hash;
+        let decrypted_hash = msg.decrypt(&self.session_data.server_sym_key, aead_nonce);
+        assert_eq!(decrypted_hash, transcript_hash);
         self.handshake_state = ClientHandshakeState::Finished;
-        self.session_data.transcript.push(msg.into());
+        self.session_data.hasher.absorb(&msg_bytes);
+        self.session_data.transcript_hash = self.session_data.hasher.finalize();
         ClientState { 
             handshake_state: self.handshake_state, 
             session_data   : self.session_data, 
             _marker        : std::marker::PhantomData
         }
-
     }
 }
 

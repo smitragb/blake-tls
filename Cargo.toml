@@ -13,3 +13,5 @@ blake3 = "1"
 serde = { version = "1", features = ["derive"]}
 bincode = "1"
 ring = "0.17" 
+chacha20poly1305 = "0.10"
+hex = "0.4"

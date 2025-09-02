@@ -11,4 +11,4 @@ handshake = { path = "../handshake" }
 serde = { workspace = true }
 bincode = { workspace = true }
 ring = { workspace = true }
-
+hex  = { workspace = true }

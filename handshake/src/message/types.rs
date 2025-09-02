@@ -1,6 +1,6 @@
+use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, KeyInit, Nonce};
 use ring::agreement::{EphemeralPrivateKey, PublicKey};
 use serde::{Deserialize, Serialize};
-
 use super::payloads::{Header, Message};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -138,11 +138,38 @@ impl ServerHelloDonePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientFinishedPayload {
     enc_transcript_hash: Vec<u8>,
+    aead_nonce: [u8; 12],
 }
 
 impl ClientFinishedPayload {
-    pub fn fill(data: Vec<u8>) -> Self {
-        Self { enc_transcript_hash: data.clone() }
+    pub fn encrypt_and_fill(key_bytes: &[u8], data: &[u8], nonce: [u8; 12]) -> Self {
+        let key   = chacha20poly1305::Key::from_slice(key_bytes);
+        let aead  = ChaCha20Poly1305::new(key);
+        let ad    = Nonce::from_slice(&nonce);
+        let ct    = aead.encrypt(ad, data).expect("Encryption Failed!");
+        Self { 
+            enc_transcript_hash: ct,
+            aead_nonce: nonce 
+        }
+    }
+
+    pub fn decrypt (&self, key_bytes: &[u8], nonce: [u8; 12]) -> Vec<u8> {
+        let ciphertext = self.enc_transcript_hash.as_ref();
+        let key   = chacha20poly1305::Key::from_slice(key_bytes);
+        let aead  = ChaCha20Poly1305::new(key);
+        let ad    = Nonce::from_slice(&nonce);
+        let plaintext  = aead.decrypt(ad, ciphertext).expect("Decryption failed");
+        plaintext
+    }
+
+    #[inline(always)]
+    pub fn prepare_message (header: Header, payload: ClientFinishedPayload) -> Message {
+        Message::new(header, payload.into())
+    }
+
+    #[inline(always)]
+    pub fn get_aead_nonce(&self) -> [u8; 12] {
+        self.aead_nonce.clone()
     }
 }
 
@@ -191,11 +218,38 @@ impl From<ClientKXPayload> for Payload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerFinishedPayload {
     enc_transcript_hash: Vec<u8>,
+    aead_nonce: [u8; 12],
 }
 
 impl ServerFinishedPayload {
-    pub fn fill(data: Vec<u8>) -> Self {
-        Self { enc_transcript_hash: data.clone() }
+    pub fn encrypt_and_fill(key_bytes: &[u8], data: &[u8], nonce: [u8; 12]) -> Self {
+        let key   = chacha20poly1305::Key::from_slice(key_bytes);
+        let aead  = ChaCha20Poly1305::new(key);
+        let ad    = Nonce::from_slice(&nonce);
+        let ct    = aead.encrypt(ad, data).expect("Encryption Failed!");
+        Self { 
+            enc_transcript_hash: ct,
+            aead_nonce: nonce,
+        }
+    }
+
+    pub fn decrypt (&self, key_bytes: &[u8], nonce: [u8; 12]) -> Vec<u8> {
+        let ciphertext = self.enc_transcript_hash.as_ref();
+        let key   = chacha20poly1305::Key::from_slice(key_bytes);
+        let aead  = ChaCha20Poly1305::new(key);
+        let ad    = Nonce::from_slice(&nonce);
+        let plaintext  = aead.decrypt(ad, ciphertext).expect("Decryption failed");
+        plaintext
+    }
+    
+    #[inline(always)]
+    pub fn prepare_message (header: Header, payload: ServerFinishedPayload) -> Message {
+        Message::new(header, payload.into())
+    }
+    
+    #[inline(always)]
+    pub fn get_aead_nonce(&self) -> [u8; 12] {
+        self.aead_nonce.clone()
     }
 }
 

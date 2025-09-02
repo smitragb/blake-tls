@@ -1,10 +1,6 @@
-#![allow(dead_code)]
-
 use std::io::{Read, Seek, SeekFrom};
-pub fn hkdf_hello() {
-    println!("HKDF says: Hello, world!");
-}
 
+#[derive(Debug)]
 pub struct Blake3Hkdf {
     hasher: blake3::Hasher,
 }

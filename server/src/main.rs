@@ -1,8 +1,7 @@
 use handshake::message::{
     payloads::{Header, Message}, 
-    types::{MessageType, Payload, ServerHelloDonePayload, ServerHelloPayload, ServerInfoPayload}
+    types::{MessageType, Payload, ServerFinishedPayload, ServerHelloDonePayload, ServerHelloPayload, ServerInfoPayload}
 };
-use hkdf::hkdf_hello;
 use server::{expect_payload, ServerState};
 use std::error::Error;
 use tokio::{
@@ -31,7 +30,6 @@ async fn handle_client (mut stream: TcpStream) -> Result<(), Box<dyn Error>> {
     let req = receive_message(&mut stream).await?;
     let payload = expect_payload!(req.get_payload(), ClientHello)?;
     let server = server.on_client_hello(payload);
-    hkdf_hello();
     
     // Server Hello
     let header      = Header::new(1234u64, "Server".to_string(), MessageType::ServerHello);
@@ -55,11 +53,27 @@ async fn handle_client (mut stream: TcpStream) -> Result<(), Box<dyn Error>> {
     let server  = server.on_server_hello_done(payload);
     send_message(&mut stream, msg).await?;
 
+    // Client Key Exchange
     let req     = receive_message(&mut stream).await?;
     let payload = expect_payload!(req.get_payload(), ClientKeyExchange)?;
     let server  = server.on_client_kx(payload);
-    println!("Session Data: {:#?}", server.session_data);
 
+    // Client Finished
+    let req     = receive_message(&mut stream).await?;
+    let payload = expect_payload!(req.get_payload(), ClientFinished)?;
+    let server  = server.on_client_finished(payload);
+
+    // Server Finished
+    let header  = Header::new(1234u64, "Server".to_string(), MessageType::ServerFinished);
+    let payload = ServerFinishedPayload::encrypt_and_fill(
+        &server.session_data.my_sym_key, 
+        &server.session_data.transcript_hash,
+        server.session_data.aead_nonce
+    ); 
+    let msg     = ServerFinishedPayload::prepare_message(header, payload.clone());
+    let _server  = server.on_server_finished();
+    send_message(&mut stream, msg).await?;
+    println!("Handshake successful!"); 
     Ok(())
 }
 
