@@ -9,8 +9,9 @@ pub enum MessageType {
     ServerHello,
     ServerInfo,
     ServerHelloDone,
-    ClientPreMasterKey,
     ClientKeyExchange,
+    ClientFinished,
+    ServerFinished,
     Error
 }
 
@@ -20,8 +21,9 @@ pub enum Payload {
     ServerHello(ServerHelloPayload),
     ServerInfo(ServerInfoPayload),
     ServerHelloDone(ServerHelloDonePayload),
-    ClientPreMasterKey(ClientPMKPayload),
     ClientKeyExchange(ClientKXPayload),
+    ClientFinished(ClientFinishedPayload),
+    ServerFinished(ServerFinishedPayload),
     Error(ErrorPayload),
 }
 
@@ -127,24 +129,26 @@ impl From<ServerHelloDonePayload> for Payload {
 }
 
 impl ServerHelloDonePayload {
+    #[inline(always)]
     pub fn prepare_message(header: Header) -> Message {
         Message::new(header, ServerHelloDonePayload {}.into())
     }
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientPMKPayload {
-    encrypted_shared: Vec<u8>,
+pub struct ClientFinishedPayload {
+    enc_transcript_hash: Vec<u8>,
 }
 
-impl ClientPMKPayload {
+impl ClientFinishedPayload {
     pub fn fill(data: Vec<u8>) -> Self {
-        Self { encrypted_shared: data.clone() }
+        Self { enc_transcript_hash: data.clone() }
     }
 }
 
-impl From<ClientPMKPayload> for Payload {
-    fn from(p: ClientPMKPayload) -> Self {
-        Payload::ClientPreMasterKey(p)
+impl From<ClientFinishedPayload> for Payload {
+    fn from(p: ClientFinishedPayload) -> Self {
+        Payload::ClientFinished(p)
     }
 }
 
@@ -159,16 +163,45 @@ impl ClientKXPayload {
         Self { ephemeral_pk: pk_bytes }
     }
 
+    #[inline(always)]
     pub fn compute_and_fill(sk: &EphemeralPrivateKey) -> Self {
         let pk = sk.compute_public_key().expect("Failed to compute Public key");
         let pk_bytes = pk.as_ref().to_vec();
         Self { ephemeral_pk: pk_bytes }
     }
+
+    #[inline(always)]
+    pub fn prepare_message (header: Header, payload: ClientKXPayload) -> Message {
+        Message::new(header, payload.into())
+    }
+    
+    #[inline(always)]
+    pub fn get_bytes(&self) -> Vec<u8> {
+        self.ephemeral_pk.clone()
+    }
+
 }
 
 impl From<ClientKXPayload> for Payload {
     fn from(p: ClientKXPayload) -> Self {
         Payload::ClientKeyExchange(p)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerFinishedPayload {
+    enc_transcript_hash: Vec<u8>,
+}
+
+impl ServerFinishedPayload {
+    pub fn fill(data: Vec<u8>) -> Self {
+        Self { enc_transcript_hash: data.clone() }
+    }
+}
+
+impl From<ServerFinishedPayload> for Payload {
+    fn from(p: ServerFinishedPayload) -> Self {
+        Payload::ServerFinished(p)
     }
 }
 

@@ -4,12 +4,19 @@ pub enum ClientHandshakeState {
     AwaitingServerHello,
     AwaitingServerInfo,
     AwaitingServerHelloDone,
+    SendingPublicKeyInfo,
+    SendingFinished,
+    AwaitingServerFinished,
     Finished,
 }
 
 pub enum ServerHandshakeState {
     AwaitingClientHello,
-    AwaitingClientPreMasterKey,
+    SendingServerHello,
+    SendingServerInfo,
+    SendingServerHelloDone,
     AwaitingClientKeyExchange,
+    AwaitingClientFinished,
+    SendingFinished,
     Finished,
 }

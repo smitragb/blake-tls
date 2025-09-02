@@ -3,7 +3,7 @@ use std::error::Error;
 use client::{ClientState,expect_payload};
 use handshake::message::{
     payloads::{Header, Message},
-    types::{ClientHelloPayload, MessageType, Payload}
+    types::{ClientHelloPayload, ClientKXPayload, MessageType, Payload}
 };
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
 
@@ -33,10 +33,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Connected to server!");
     let header  = Header::new(0u64, "Client1".to_string(), MessageType::ClientHello);
 
-    let client = ClientState::new();
+    let client  = ClientState::new();
     let payload = ClientHelloPayload::fill_nonce(client.session_data.my_nonce);
-    let msg = ClientHelloPayload::prepare_message(header, payload.clone());
-    let client = client.on_client_hello(payload);
+    let msg     = ClientHelloPayload::prepare_message(header, payload.clone());
+    let client  = client.on_client_hello(payload);
     send_message(&mut stream, msg).await?;
 
     let resp    = receive_message(&mut stream).await?;
@@ -47,10 +47,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let payload = expect_payload!(resp.get_payload(), ServerInfo)?;
     let client  = client.on_server_info(payload);
 
-    let resp    = receive_message(&mut stream).await?;
-    let payload = expect_payload!(resp.get_payload(), ServerHelloDone)?;
-    let client  = client.on_server_hello_done(payload);
+    let resp        = receive_message(&mut stream).await?;
+    let payload     = expect_payload!(resp.get_payload(), ServerHelloDone)?;
+    let mut client  = client.on_server_hello_done(payload);
 
+    
+    let header  = Header::new(0u64, "Client1".to_string(), MessageType::ClientKeyExchange);
+    let my_sk   = client.session_data.get_sk();
+    let payload = ClientKXPayload::compute_and_fill(my_sk);
+    let msg     = ClientKXPayload::prepare_message(header, payload.clone());
+    let client  = client.on_client_pk_info(payload);
+    send_message(&mut stream, msg).await?;
+
+    /*
+    let header  = Header::new(0u64, "Client1".to_string(), MessageType::ClientPreMasterKey);
+    */
     println!("Session Data: {:#?}", client.session_data);
     Ok(())
 }

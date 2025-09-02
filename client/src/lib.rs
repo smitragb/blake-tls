@@ -1,10 +1,12 @@
 #![allow(dead_code)]
 use handshake::{
-    message::types::{ClientHelloPayload, Payload, ServerHelloDonePayload, ServerHelloPayload, ServerInfoPayload}, 
+    message::types::{
+        ClientFinishedPayload, ClientHelloPayload, ClientKXPayload, Payload, ServerFinishedPayload, ServerHelloDonePayload, ServerHelloPayload, ServerInfoPayload
+    }, 
     protocol::state::ClientHandshakeState
 };
 use ring::{
-    agreement::{EphemeralPrivateKey, X25519}, 
+    agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519}, 
     rand::{SecureRandom, SystemRandom}
 };
 
@@ -12,7 +14,11 @@ pub struct Start;
 pub struct AwaitingServerHello;
 pub struct AwaitingServerInfo;
 pub struct AwaitingServerHelloDone;
+pub struct SendingPublicKeyInfo;
+pub struct SendingFinished;
+pub struct AwaitingServerFinished;
 pub struct Finished;
+
 
 #[macro_export]
 macro_rules! expect_payload {
@@ -37,7 +43,7 @@ pub struct SessionData {
     pub server_nonce: [u8; 32],
     pub my_nonce: [u8; 32],
     pub server_pk_bytes: Vec<u8>,
-    my_sk: EphemeralPrivateKey,
+    my_sk: Option<EphemeralPrivateKey>,
     pub shared_secret: Vec<u8>,
 }
 
@@ -54,9 +60,22 @@ impl SessionData {
             server_nonce: [0u8; 32],
             my_nonce: out.clone(),
             server_pk_bytes: Vec::new(),
-            my_sk: sk,
+            my_sk: Some(sk),
             shared_secret: Vec::new(),
         }
+    }
+
+    pub fn take_sk(&mut self) -> Option<EphemeralPrivateKey> {
+        self.my_sk.take()
+    } 
+
+    pub fn get_sk(&mut self) -> &EphemeralPrivateKey {
+        if self.my_sk.is_none() {
+            let sk = EphemeralPrivateKey::generate(&X25519, &self.rng)
+                .expect("Unable to generate private key");
+            self.my_sk = Some(sk);
+        }
+        self.my_sk.as_ref().unwrap()
     }
 }
 
@@ -122,6 +141,60 @@ impl ClientState<AwaitingServerHelloDone> {
     pub fn on_server_hello_done (
         mut self, 
         msg: ServerHelloDonePayload
+    ) -> ClientState<SendingPublicKeyInfo> {
+        self.handshake_state = ClientHandshakeState::SendingPublicKeyInfo;
+        self.session_data.transcript.push(msg.into());
+        ClientState { 
+            handshake_state: self.handshake_state, 
+            session_data   : self.session_data, 
+            _marker        : std::marker::PhantomData
+        }
+    }
+}
+
+impl ClientState<SendingPublicKeyInfo> {
+    pub fn on_client_pk_info (
+        mut self,
+        msg: ClientKXPayload
+    ) -> ClientState<SendingFinished> {
+        self.handshake_state = ClientHandshakeState::SendingFinished;
+        self.session_data.transcript.push(msg.into());
+        
+        // Using unwrap here because sk is guaranteed to be present since the 
+        // ClientKXPayload contains the public key.
+        let sk = self.session_data.take_sk().unwrap();
+        let peer_pk = UnparsedPublicKey::new(&X25519, self.session_data.server_pk_bytes.clone());
+        let shared = ring::agreement::agree_ephemeral(sk, &peer_pk,
+            |ss| { ss.to_vec() }).expect("Unable to generate shared secret");
+        self.session_data.shared_secret = shared;
+
+        ClientState {
+            handshake_state: self.handshake_state,
+            session_data   : self.session_data,
+            _marker        : std::marker::PhantomData
+        }
+    }
+}
+
+impl ClientState<SendingFinished> {
+    pub fn on_client_finished (
+        mut self,
+        msg: ClientFinishedPayload,
+    ) -> ClientState<AwaitingServerFinished> {
+        self.handshake_state = ClientHandshakeState::AwaitingServerFinished;
+        self.session_data.transcript.push(msg.into());
+        ClientState { 
+            handshake_state: self.handshake_state, 
+            session_data   : self.session_data, 
+            _marker        : std::marker::PhantomData
+        }
+    } 
+}
+
+impl ClientState<AwaitingServerFinished> {
+    pub fn on_server_finished (
+        mut self,
+        msg: ServerFinishedPayload,
     ) -> ClientState<Finished> {
         self.handshake_state = ClientHandshakeState::Finished;
         self.session_data.transcript.push(msg.into());
@@ -130,6 +203,7 @@ impl ClientState<AwaitingServerHelloDone> {
             session_data   : self.session_data, 
             _marker        : std::marker::PhantomData
         }
+
     }
 }
 
