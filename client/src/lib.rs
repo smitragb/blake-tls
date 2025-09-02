@@ -5,6 +5,7 @@ use handshake::{
     }, 
     protocol::state::ClientHandshakeState
 };
+use hkdf::Blake3Hkdf;
 use ring::{
     agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519}, 
     rand::{SecureRandom, SystemRandom}
@@ -18,7 +19,7 @@ pub struct SendingPublicKeyInfo;
 pub struct SendingFinished;
 pub struct AwaitingServerFinished;
 pub struct Finished;
-
+static SYM_KEY_LEN: usize = 32;
 
 #[macro_export]
 macro_rules! expect_payload {
@@ -45,6 +46,8 @@ pub struct SessionData {
     pub server_pk_bytes: Vec<u8>,
     my_sk: Option<EphemeralPrivateKey>,
     pub shared_secret: Vec<u8>,
+    pub server_sym_key: Vec<u8>,
+    pub my_sym_key: Vec<u8>,
 }
 
 impl SessionData {
@@ -62,6 +65,8 @@ impl SessionData {
             server_pk_bytes: Vec::new(),
             my_sk: Some(sk),
             shared_secret: Vec::new(),
+            server_sym_key: Vec::new(),
+            my_sym_key: Vec::new(),
         }
     }
 
@@ -157,6 +162,8 @@ impl ClientState<SendingPublicKeyInfo> {
         mut self,
         msg: ClientKXPayload
     ) -> ClientState<SendingFinished> {
+        let server_nonce = self.session_data.server_nonce;
+        let my_nonce = self.session_data.my_nonce;
         self.handshake_state = ClientHandshakeState::SendingFinished;
         self.session_data.transcript.push(msg.into());
         
@@ -166,7 +173,17 @@ impl ClientState<SendingPublicKeyInfo> {
         let peer_pk = UnparsedPublicKey::new(&X25519, self.session_data.server_pk_bytes.clone());
         let shared = ring::agreement::agree_ephemeral(sk, &peer_pk,
             |ss| { ss.to_vec() }).expect("Unable to generate shared secret");
-        self.session_data.shared_secret = shared;
+        let mut hkdf = Blake3Hkdf::new();
+        hkdf.absorb(shared.clone())
+            .absorb(b"Key Expansion")
+            .absorb(server_nonce)
+            .absorb(my_nonce)
+            .squeeze(64);
+        let server_sym_key = hkdf.read_at(0, SYM_KEY_LEN);
+        let my_sym_key     = hkdf.read_at(SYM_KEY_LEN as u64, SYM_KEY_LEN);
+        self.session_data.shared_secret  = shared;
+        self.session_data.server_sym_key = server_sym_key;
+        self.session_data.my_sym_key     = my_sym_key;
 
         ClientState {
             handshake_state: self.handshake_state,

@@ -2,10 +2,12 @@
 
 use handshake::{
     message::types::{
-        ClientFinishedPayload, ClientHelloPayload, ClientKXPayload, Payload, ServerHelloDonePayload, ServerHelloPayload, ServerInfoPayload
+        ClientFinishedPayload, ClientHelloPayload, ClientKXPayload, 
+        Payload, ServerHelloDonePayload, ServerHelloPayload, ServerInfoPayload
     },
     protocol::state::ServerHandshakeState
 };
+use hkdf::Blake3Hkdf;
 use ring::{
     agreement::{EphemeralPrivateKey, UnparsedPublicKey, X25519}, 
     rand::{SecureRandom, SystemRandom}
@@ -19,6 +21,7 @@ pub struct AwaitingClientKeyExchange;
 pub struct AwaitingClientFinished;
 pub struct SendingFinished;
 pub struct Finished;
+static SYM_KEY_LEN: usize = 32;
 
 #[macro_export]
 macro_rules! expect_payload {
@@ -39,6 +42,8 @@ pub struct SessionData {
     my_sk: Option<EphemeralPrivateKey>,
     pub client_pk: Vec<u8>,
     pub shared_secret: Vec<u8>,
+    pub my_sym_key: Vec<u8>,
+    pub client_sym_key: Vec<u8>,
 }
 
 impl SessionData {
@@ -56,6 +61,8 @@ impl SessionData {
             my_sk: Some(sk),
             client_pk: Vec::new(),
             shared_secret: Vec::new(),
+            my_sym_key: Vec::new(),
+            client_sym_key: Vec::new(),
         }
     }
     
@@ -155,6 +162,8 @@ impl ServerState<AwaitingClientKeyExchange> {
         mut self, 
         msg: ClientKXPayload
     ) -> ServerState<AwaitingClientFinished> {
+        let my_nonce = self.session_data.my_nonce;
+        let client_nonce = self.session_data.client_nonce;
         let client_pk_bytes = msg.get_bytes();
         self.handshake_state = ServerHandshakeState::AwaitingClientFinished;
         self.session_data.transcript.push(msg.into());
@@ -165,7 +174,18 @@ impl ServerState<AwaitingClientKeyExchange> {
         let peer_pk = UnparsedPublicKey::new(&X25519, client_pk_bytes);
         let shared = ring::agreement::agree_ephemeral(sk, &peer_pk, 
             |ss| { ss.to_vec() }).expect("Unable to agree shared secret");
-        self.session_data.shared_secret = shared;
+        let mut hkdf = Blake3Hkdf::new();
+        hkdf.absorb(shared.clone())
+            .absorb(b"Key Expansion")
+            .absorb(my_nonce)
+            .absorb(client_nonce)
+            .squeeze(64);
+        let my_sym_key     = hkdf.read_at(0, SYM_KEY_LEN); 
+        let client_sym_key = hkdf.read_at(SYM_KEY_LEN as u64, SYM_KEY_LEN);
+        self.session_data.shared_secret  = shared;
+        self.session_data.my_sym_key     = my_sym_key;
+        self.session_data.client_sym_key = client_sym_key;
+
         ServerState {
             handshake_state: self.handshake_state, 
             session_data   : self.session_data, 
