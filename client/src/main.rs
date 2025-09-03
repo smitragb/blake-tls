@@ -58,14 +58,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let client  = client.on_client_pk_info(payload);
     send_message(&mut stream, msg).await?;
 
-    let header  = Header::new(0u64, "Client1".to_string(), MessageType::ClientFinished);
-    let payload = ClientFinishedPayload::encrypt_and_fill (
+    let header   = Header::new(0u64, "Client1".to_string(), MessageType::ClientFinished);
+    let ad_nonce = client.session_data.get_aead_nonce();
+    let payload  = ClientFinishedPayload::encrypt_and_fill (
         &client.session_data.my_sym_key, 
         &client.session_data.transcript_hash,
-        client.session_data.aead_nonce,
+        ad_nonce,
     );
-    let msg     = ClientFinishedPayload::prepare_message(header, payload.clone());
-    let client  = client.on_client_finished(payload);
+    let msg      = ClientFinishedPayload::prepare_message(header, payload.clone());
+    let client   = client.on_client_finished(payload);
     send_message(&mut stream, msg).await?;
     
     let resp    = receive_message(&mut stream).await?;

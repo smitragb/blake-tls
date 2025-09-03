@@ -43,7 +43,6 @@ pub struct SessionData {
     pub shared_secret: Vec<u8>,
     pub my_sym_key: Vec<u8>,
     pub client_sym_key: Vec<u8>,
-    pub aead_nonce: [u8; 12],
 }
 
 impl SessionData {
@@ -52,9 +51,7 @@ impl SessionData {
         let sk = EphemeralPrivateKey::generate(&X25519, &rng)
             .expect("Unable to generate private key");
         let mut out = [0u8; 32];
-        let mut nonce = [0u8; 12];
         rng.fill(&mut out).expect("Unable to generate nonce");
-        rng.fill(&mut nonce).expect("Unable to generate AEAD nonce");
         Self {
             rng,
             hasher: Blake3Hkdf::new(),
@@ -66,7 +63,6 @@ impl SessionData {
             shared_secret: Vec::new(),
             my_sym_key: Vec::new(),
             client_sym_key: Vec::new(),
-            aead_nonce: nonce
         }
     }
     
@@ -81,6 +77,17 @@ impl SessionData {
             self.my_sk = Some(sk);
         }
         self.my_sk.as_ref().unwrap()
+    }
+    
+    pub fn get_aead_nonce(&self) -> [u8; 12] {
+        Blake3Hkdf::new()
+            .absorb(&self.shared_secret)
+            .absorb(b"AEAD Nonce")
+            .absorb(&self.my_nonce)
+            .absorb(&self.client_nonce)
+            .squeeze(12)
+            .try_into()
+            .unwrap()
     }
 
 }
@@ -214,7 +221,7 @@ impl ServerState<AwaitingClientFinished> {
         msg: ClientFinishedPayload
     ) -> ServerState<SendingFinished> {
         let msg_bytes  = bincode::serialize(&msg).unwrap();
-        let aead_nonce = msg.get_aead_nonce();
+        let aead_nonce = self.session_data.get_aead_nonce();
         let transcript_hash = self.session_data.transcript_hash;
         let decrypted_hash  = msg.decrypt(&self.session_data.client_sym_key, aead_nonce);
         assert_eq!(decrypted_hash, transcript_hash);

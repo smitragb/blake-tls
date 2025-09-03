@@ -64,13 +64,14 @@ async fn handle_client (mut stream: TcpStream) -> Result<(), Box<dyn Error>> {
     let server  = server.on_client_finished(payload);
 
     // Server Finished
-    let header  = Header::new(1234u64, "Server".to_string(), MessageType::ServerFinished);
-    let payload = ServerFinishedPayload::encrypt_and_fill(
+    let header   = Header::new(1234u64, "Server".to_string(), MessageType::ServerFinished);
+    let ad_nonce = server.session_data.get_aead_nonce();
+    let payload  = ServerFinishedPayload::encrypt_and_fill(
         &server.session_data.my_sym_key, 
         &server.session_data.transcript_hash,
-        server.session_data.aead_nonce
+        ad_nonce
     ); 
-    let msg     = ServerFinishedPayload::prepare_message(header, payload.clone());
+    let msg      = ServerFinishedPayload::prepare_message(header, payload.clone());
     let _server  = server.on_server_finished();
     send_message(&mut stream, msg).await?;
     println!("Handshake successful!"); 

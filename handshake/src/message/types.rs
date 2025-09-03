@@ -138,7 +138,6 @@ impl ServerHelloDonePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientFinishedPayload {
     enc_transcript_hash: Vec<u8>,
-    aead_nonce: [u8; 12],
 }
 
 impl ClientFinishedPayload {
@@ -147,10 +146,7 @@ impl ClientFinishedPayload {
         let aead  = ChaCha20Poly1305::new(key);
         let ad    = Nonce::from_slice(&nonce);
         let ct    = aead.encrypt(ad, data).expect("Encryption Failed!");
-        Self { 
-            enc_transcript_hash: ct,
-            aead_nonce: nonce 
-        }
+        Self { enc_transcript_hash: ct }
     }
 
     pub fn decrypt (&self, key_bytes: &[u8], nonce: [u8; 12]) -> Vec<u8> {
@@ -165,11 +161,6 @@ impl ClientFinishedPayload {
     #[inline(always)]
     pub fn prepare_message (header: Header, payload: ClientFinishedPayload) -> Message {
         Message::new(header, payload.into())
-    }
-
-    #[inline(always)]
-    pub fn get_aead_nonce(&self) -> [u8; 12] {
-        self.aead_nonce.clone()
     }
 }
 
@@ -218,7 +209,6 @@ impl From<ClientKXPayload> for Payload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerFinishedPayload {
     enc_transcript_hash: Vec<u8>,
-    aead_nonce: [u8; 12],
 }
 
 impl ServerFinishedPayload {
@@ -227,10 +217,7 @@ impl ServerFinishedPayload {
         let aead  = ChaCha20Poly1305::new(key);
         let ad    = Nonce::from_slice(&nonce);
         let ct    = aead.encrypt(ad, data).expect("Encryption Failed!");
-        Self { 
-            enc_transcript_hash: ct,
-            aead_nonce: nonce,
-        }
+        Self { enc_transcript_hash: ct }
     }
 
     pub fn decrypt (&self, key_bytes: &[u8], nonce: [u8; 12]) -> Vec<u8> {
@@ -245,11 +232,6 @@ impl ServerFinishedPayload {
     #[inline(always)]
     pub fn prepare_message (header: Header, payload: ServerFinishedPayload) -> Message {
         Message::new(header, payload.into())
-    }
-    
-    #[inline(always)]
-    pub fn get_aead_nonce(&self) -> [u8; 12] {
-        self.aead_nonce.clone()
     }
 }
 
