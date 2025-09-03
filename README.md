@@ -4,15 +4,15 @@ This project implements a **type-safe TLS 1.2 handshake** in Rust, replacing the
 ## Features
 - **Type-safe state machine**:
   TLS handshake is a stateful protocol that allows session resumption and restarts. For this project, the handshake flow is a linear state machine; therefore, the project doesn't support the features mentioned earlier. Rust offers the nice feature to disable illegal state transitions at compile-time, making it an attractive choice. The implementation expects the right message payload for the current state on both client and server, thus enforcing correctness through compile-time safety.
-- **Custom KDF using BLAKE3**
+- **Custom KDF using BLAKE3**:
   After establishing a shared secret through RSA-based/Elliptic curve Diffie-Hellman-based/Kyber-Dilithium-based key exchange, the protocol generates the symmetric keys to encrypt the TCP pipe in either direction. For this project, I use ``blake3`` in XOF mode to generate the symmetric keys for ChaCha20Poly1305 symmetric cipher. 
-- **Transcript Validation**
+- **Transcript Validation**:
   With the symmetric keys established, each participant sends the encrypted hash of the conversation, thus safeguarding against replay attacks. This feature is supported in this project.
 
 ## Motivation
-- **Potential Performance gains?**
+- **Potential Performance gains?**:
   ``blake3`` is a parallelizable hash function that is optimized for modern hardware with **5-6x** performance gains over SHA2/SHA3-based hash functions.
-- **Protocol rigor**
+- **Protocol rigor**:
   Rust's type-safety enables a compile-time safe implementation of the protocol that retains the correctness guarantees of the theoretical construction.
 
 ## Requirements
